@@ -15,8 +15,8 @@ import torchvision
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-N_t = 70
-N_x = 70
+N_t = 500
+N_x = 500
 T_0 = 0
 TIME_LENGTH = 5
 X_0 =-10
@@ -125,8 +125,9 @@ class PeriodicResNet(nn.Module):
         x = F.tanh(self.fc4(x))
         x = self.fc5(x)
         if self.inital_condition is not None:
-            x= self.inital_condition(space)+  time/TIME_LENGTH*x
-
+            # frac = torch.minimum(torch.tensor([1], device=DEVICE),time/D_T)
+            # x= self.inital_condition(space)*(1-frac) +  frac*x
+            x= self.inital_condition(space) +  time/D_T*x
         return x
 
 class Net1(nn.Module):
@@ -191,7 +192,9 @@ class Net2(nn.Module):
         x = F.tanh(self.fc4(x))
         x = self.fc5(x)
         if self.inital_condition is not None:
-            x= self.inital_condition(space)+  time/TIME_LENGTH*x
+            # frac = torch.minimum(torch.tensor([1], device=DEVICE),time/D_T)
+            # x= self.inital_condition(space)*(1-frac) +  frac*x
+            x= self.inital_condition(space) +  time/D_T*x
         return x
     
 class Net3(nn.Module):
@@ -226,9 +229,10 @@ class Net3(nn.Module):
         x = F.tanh(self.fc4(x))
         x = self.fc5(x)
         if self.inital_condition is not None:
-            x= self.inital_condition(space)+  time/TIME_LENGTH*x
+            # frac = torch.minimum(torch.tensor([1], device=DEVICE),time/D_T)
+            # x= self.inital_condition(space)*(1-frac) +  frac*x
+            x= self.inital_condition(space) +  time/D_T*x
         return x
-
 #%%
 
 def time_D(psi, dt):
@@ -262,17 +266,29 @@ def lagrangian_loss(psi,dt,dx): #Schrödinger field
     N = N.mean().real
     return L/N
 
+def equation_motion_net_loss(net,x):
+    net_out = net(x)
+    real, imag = torch.split(net_out,1,-1)
+
+    dreal_x = torch.autograd.grad(real,x,torch.ones_like(real), create_graph=True, retain_graph=True)[0]
+    dreal_xx = torch.autograd.grad(dreal_x,x,torch.ones_like(dreal_x), retain_graph=True)[0]
+
+    dimag_x = torch.autograd.grad(imag,x,torch.ones_like(imag), create_graph=True, retain_graph=True)[0]
+    dimag_xx = torch.autograd.grad(dimag_x,x,torch.ones_like(dimag_x), retain_graph=True)[0]
+
+    real_part = 0.5*dreal_xx[:,1] - dimag_x[:,0]
+    imag_part = 0.5*dimag_xx[:,1] + dreal_x[:,0]
+
+    equation =  real_part + imag_part*1j
+    return equation.norm(dtype=torch.complex64)
+
 def complex_norm_loss(output, target):
     return (output - target).norm(dtype=torch.complex64)
 
-def equation_motion_loss(psi, n_t, n_x, time_len, space_period):
-    """Schrödinger equation with Monte Carlo integration"""
-    psi = psi.reshape(n_t,n_x)
-
-    time_int = torch.sum(psi)/n_t*time_len
-    space_int2 = torch.sum(psi)/n_x*space_period**2
-
-    return (1j*space_int2+0.5*time_int).norm(dtype=torch.complex64)
+def equation_motion_loss(psi,dt,dx):
+    """Schrödinger equation"""
+    equation = 1j*time_D(psi, dt)+0.5*space_D2(psi, dx)
+    return (equation).norm(dtype=torch.complex64)
 
 #%%
 
@@ -303,6 +319,15 @@ def get_space_time_grid(t_0=T_0, x_0=X_0):
     x = torch.flatten(x, end_dim=-2)    
     return x, time_lin, space_lin
 
+def get_rand_space_time_pair():
+    if N_t == N_x:
+        rand_time = T_0 + torch.rand(N_t, device=DEVICE)*TIME_LENGTH
+        rand_space = X_0 + torch.rand(N_x, device=DEVICE)*SPACE_PERIOD
+        x = torch.cat((rand_time[:,None],rand_space[:,None]), dim=-1)
+        return x, rand_time, rand_space
+    else:
+        raise RuntimeError("N_t not equal N_x")
+
 def get_rand_space_time_grid():
     x_0 = X_0+random()*D_X
     t_0 = T_0+random()*D_T
@@ -329,8 +354,8 @@ def plot_net(net, ax):
     #dt = t_len/(n_t-1)
     #dx = space_period/(n_x-1)
     psi2 = (torch.conj(psi)*psi).real
-    N = D_X*torch.sum(psi2,dim=1)[:,None]
-    psi2 = psi2 /N
+    #N = D_X*torch.sum(psi2,dim=1)[:,None]
+    psi2 = psi2 #/N
 
     ax.clear()
     ax.plot_surface(time.cpu(),space.cpu(),psi2.cpu())
@@ -385,7 +410,8 @@ if __name__ == "__main__":
     # boundary_net.load_state_dict(torch.load("./bresnet_test1.pth"))
 
     #main_net.load_state_dict(torch.load("./mnet.pth"))
-    main_optimizer = optim.Adam(main_net.parameters(), lr=0.0005, fused=True)
+    main_optimizer = optim.Adam(main_net.parameters(), lr=0.001)
+    #main_optimizer = optim.Adagrad(main_net.parameters())
     # main_optimizer = optim.LBFGS(main_net.parameters())
     
     # x, time_lin, space_lin = get_space_time_grid(n_t, n_x, t_len=time_len, space_period=space_period)
@@ -418,19 +444,22 @@ if __name__ == "__main__":
     #     return total
 
     for epoch in range(5*10**5): 
-        x, time_lin, space_lin = get_space_time_grid()
+        #x, time_lin, space_lin = get_space_time_grid()
+        x, time_lin, space_lin  = get_rand_space_time_pair()
+        x.requires_grad_(True)
         
         # zero the parameter gradients
-        main_optimizer.zero_grad()
+        #main_optimizer.zero_grad()
 
         # forward + backward + optimize
         #boundary = boundary_net(x)
         
-        psi = get_psi(main_net(x))
-        psi = psi.reshape(N_t,N_x) #for grid
+        #psi = get_psi(main_net(x))
+        #psi = psi.reshape(N_t,N_x) #for grid
         
-        L_loss = lagrangian_loss(psi,D_T,D_X)
-        loss = L_loss
+        #loss = lagrangian_loss(psi,D_T,D_X)
+        #loss = equation_motion_loss(psi,D_T,D_X)
+        loss = equation_motion_net_loss(main_net,x)
 
         loss.backward()
         main_optimizer.step()

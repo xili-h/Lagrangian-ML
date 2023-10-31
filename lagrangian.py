@@ -340,7 +340,8 @@ def plot_net(net, ax):
 
 
 if __name__ == "__main__":
-    main_net = Net2(initial_wavepacket_3)
+    #main_net = Net2(initial_wavepacket_3)
+    main_net = Net2()
     main_net.to(DEVICE)
 
     # boundary_net = PeriodicResNet()
@@ -385,7 +386,7 @@ if __name__ == "__main__":
     # boundary_net.load_state_dict(torch.load("./bresnet_test1.pth"))
 
     #main_net.load_state_dict(torch.load("./mnet.pth"))
-    main_optimizer = optim.Adam(main_net.parameters(), lr=0.0005, fused=True)
+    main_optimizer = optim.Adam(main_net.parameters(), lr=0.001, fused=True)
     # main_optimizer = optim.LBFGS(main_net.parameters())
     
     # x, time_lin, space_lin = get_space_time_grid(n_t, n_x, t_len=time_len, space_period=space_period)
@@ -430,7 +431,10 @@ if __name__ == "__main__":
         psi = psi.reshape(N_t,N_x) #for grid
         
         L_loss = lagrangian_loss(psi,D_T,D_X)
-        loss = L_loss
+        boundary_space_lin = get_rand_space()
+        boundary = torch.cat((torch.zeros_like(boundary_space_lin[:,None]),boundary_space_lin[:,None]),dim=-1)
+        boundary_loss = complex_norm_loss(get_psi(main_net(boundary)), initial_wavepacket(boundary_space_lin)[:,None])
+        loss = L_loss + boundary_loss
 
         loss.backward()
         main_optimizer.step()
@@ -438,7 +442,7 @@ if __name__ == "__main__":
         # print statistics
         running_loss = loss.item()
         if epoch % 100 == 0:
-            print(f'[{epoch + 1}] totol_loss: {running_loss}')
+            print(f'[{epoch + 1}] totol_loss: {running_loss} b_loss: {boundary_loss}')
         if epoch % 200 == 0:
             with torch.no_grad():
                 plot_net(main_net,ax)

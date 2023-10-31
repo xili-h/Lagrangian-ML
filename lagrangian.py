@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import math
 from random import random
+import matplotlib.pyplot as plt
 
 #%%
 import torch.optim as optim
@@ -10,9 +11,18 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from torch.nn.parameter import Parameter
-import matplotlib.pyplot as plt
+import torchvision
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+N_t = 70
+N_x = 70
+T_0 = 0
+TIME_LENGTH = 5
+X_0 =-10
+SPACE_PERIOD = 20
+D_T = TIME_LENGTH/(N_t-1)
+D_X = SPACE_PERIOD/(N_x-1)
 
 class Inital_Condition(nn.Module):
     #Maybe 2004.06490
@@ -87,11 +97,43 @@ class Periodic(nn.Module):
     def extra_repr(self) -> str:
         return f'in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None}'
 
-class Net(nn.Module):
+class PeriodicResNet(nn.Module):
+    def __init__(self, inital_condition=None):
+        super().__init__()
+        self.time_fc = nn.Linear(1, 32)
+        self.space_periodic = Periodic(1, 32, SPACE_PERIOD)
+        self.space_time_fc = nn.Linear(64, 32*32*3) 
+        self.resnet = torchvision.models.resnet18()
+        self.fc1 = nn.Linear(1000, 400)
+        self.fc2 = nn.Linear(400, 120)
+        self.fc3 = nn.Linear(120, 84)
+        self.fc4 = nn.Linear(84, 10)
+        self.fc5 = nn.Linear(10, 2)
+        self.inital_condition = inital_condition 
+
+    def forward(self, x): #x = [time, space]
+        time, space = torch.split(x,1,-1)
+        time_x = self.time_fc(time)
+        space_x = torch.flatten(self.space_periodic(space), 1)
+        x = torch.cat((time_x, space_x),1) #x[0] is time, x[1] is space
+        x = self.space_time_fc(x)
+        x = x.reshape(-1,3,32,32)
+        x = self.resnet(x)
+        x = F.tanh(self.fc1(x))
+        x = F.tanh(self.fc2(x))
+        x = F.tanh(self.fc3(x))
+        x = F.tanh(self.fc4(x))
+        x = self.fc5(x)
+        if self.inital_condition is not None:
+            x= self.inital_condition(space)+  time/TIME_LENGTH*x
+
+        return x
+
+class Net1(nn.Module):
     def __init__(self, space_period=20):
         super().__init__()
         self.time_fc = nn.Linear(1, 32)
-        self.space_periodic = Periodic(1, 32, space_period,bias=False)
+        self.space_periodic = Periodic(1, 32, space_period)
         self.init_periodic_fc = nn.Linear(64, 32*32) 
         self.conv1 = nn.Conv2d(1, 6, 5)
         self.pool = nn.MaxPool2d(2, 2)
@@ -117,12 +159,11 @@ class Net(nn.Module):
         x = self.fc4(x)
         return x
 
-
 class Net2(nn.Module):
-    def __init__(self, space_period=20):
+    def __init__(self, inital_condition=None):
         super().__init__()
         self.time_fc = nn.Linear(1, 32)
-        self.space_periodic = Periodic(1, 32, space_period,bias=False)
+        self.space_periodic = Periodic(1, 32, SPACE_PERIOD)
         self.init_periodic_fc = nn.Linear(64, 32*32) 
         self.conv1 = nn.Conv2d(1, 12, 5)
         self.pool = nn.MaxPool2d(2, 2)
@@ -132,12 +173,13 @@ class Net2(nn.Module):
         self.fc3 = nn.Linear(168, 20)
         self.fc4 = nn.Linear(20, 8)
         self.fc5 = nn.Linear(8, 2)
+        self.inital_condition = inital_condition
 
     def forward(self, x): #x = [time, space]
         time, space = torch.split(x,1,-1)
-        time = self.time_fc(time)
-        space = torch.flatten(self.space_periodic(space), 1)
-        x = torch.cat((time, space),1) #x[0] is time, x[1] is space
+        time_x = self.time_fc(time)
+        space_x = torch.flatten(self.space_periodic(space), 1)
+        x = torch.cat((time_x, space_x),1) #x[0] is time, x[1] is space
         x = self.init_periodic_fc(x)
         x = x.reshape(-1,1,32,32)
         x = self.pool(F.tanh(self.conv1(x)))
@@ -148,16 +190,44 @@ class Net2(nn.Module):
         x = F.tanh(self.fc3(x))
         x = F.tanh(self.fc4(x))
         x = self.fc5(x)
+        if self.inital_condition is not None:
+            x= self.inital_condition(space)+  time/TIME_LENGTH*x
         return x
     
+class Net3(nn.Module):
+    def __init__(self, inital_condition=None):
+        super().__init__()
+        self.time_fc = nn.Linear(1, 32)
+        self.space_periodic = Periodic(1, 32, SPACE_PERIOD)
+        self.init_periodic_fc = nn.Linear(64, 32*32) 
+        self.conv1 = nn.Conv2d(1, 15, 5)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.conv2 = nn.Conv2d(15, 40, 5)
+        self.fc1 = nn.Linear(40 * 5 * 5, 240)
+        self.fc2 = nn.Linear(240, 168)
+        self.fc3 = nn.Linear(168, 90)
+        self.fc4 = nn.Linear(90, 20)
+        self.fc5 = nn.Linear(20, 2)
+        self.inital_condition = inital_condition
 
-        
-net = Net2()
-
-if __name__ == '__main__':
-    #check periodic
-    with torch.no_grad():
-        print(net(torch.tensor([[1.,2.],[1.,-18.],[1.,22.]])))
+    def forward(self, x): #x = [time, space]
+        time, space = torch.split(x,1,-1)
+        time_x = self.time_fc(time)
+        space_x = torch.flatten(self.space_periodic(space), 1)
+        x = torch.cat((time_x, space_x),1) #x[0] is time, x[1] is space
+        x = self.init_periodic_fc(x)
+        x = x.reshape(-1,1,32,32)
+        x = self.pool(F.tanh(self.conv1(x)))
+        x = self.pool(F.tanh(self.conv2(x)))
+        x = torch.flatten(x,1) # flatten all dimensions except batch
+        x = F.tanh(self.fc1(x))
+        x = F.tanh(self.fc2(x))
+        x = F.tanh(self.fc3(x))
+        x = F.tanh(self.fc4(x))
+        x = self.fc5(x)
+        if self.inital_condition is not None:
+            x= self.inital_condition(space)+  time/TIME_LENGTH*x
+        return x
 
 #%%
 
@@ -204,168 +274,182 @@ def equation_motion_loss(psi, n_t, n_x, time_len, space_period):
 
     return (1j*space_int2+0.5*time_int).norm(dtype=torch.complex64)
 
-def get_space_time_grid(n_t,n_x,
-            t_0=0, t_len=5,x_0=-10,space_period=20):
-    space_lin = torch.linspace(x_0, x_0+space_period, n_x, device=DEVICE)
-    time_lin = torch.linspace(t_0, t_0+t_len, n_t, device=DEVICE)
-    time, space = torch.meshgrid(time_lin,space_lin,indexing='ij')
-    x = torch.cat((time[:,:,None],space[:,:,None]),-1)
-    x = torch.flatten(x, end_dim=-2)    
-    return x, time_lin, space_lin
-
-def get_rand_space_time_grid(n_t,n_x,
-            t_0=0, t_len=5,x_0=-10,space_period=20):
-    dt = t_len/(n_t-1)
-    dx = space_period/(n_x-1)
-    x_0 = x_0+random()*dx
-    t_0 = t_0+random()*dt
-    x, time_lin, space_lin = get_space_time_grid(n_t, n_x, t_0, t_len,x_0,space_period)
-    return x, time_lin, space_lin, dt, dx
-
-def get_rand_space_time_pair(n_t,n_x,
-            t_0=0, t_len=5,x_0=-10,space_period=20):
-    rand_time = t_0 + torch.rand(n_t, device=DEVICE)*t_len
-    rand_space = x_0 + torch.rand(n_x, device=DEVICE)*space_period
-    x = torch.cat((rand_time[:,None],rand_space[:,None]), dim=-1)
-    return x, rand_time, rand_space
+#%%
 
 def get_psi(net_output):
     real, img = torch.split(net_output,1,-1)
     psi = real+img*1j #wave function
     return psi
 
-def initial_wavepacket(space, x_0=-5, sigma=0.5, k0=-5):
-    wave = (sigma*np.sqrt(np.pi))**(-0.5)*torch.exp(-(space-x_0)**2/(2*sigma**2) + (k0*space)*1j)
+def initial_wavepacket(space, x_0=-5, sigma=0.5, k0=5):
+    wave = (sigma*math.sqrt(math.pi))**(-0.5)*torch.exp(-(space-x_0)**2/(2*sigma**2) + (k0*space)*1j)
     return wave
-def initial_wavepacket_2(space, x_0=0, sigma=0.5, k0=5):
-    wave = (sigma*np.sqrt(np.pi))**(-0.5)*torch.exp( -(space-x_0)**2/(2*sigma**2))
-    return wave*np.cos(k0*x) + wave*np.sin(k0*x)*1j
+
+def initial_wavepacket_2(x, x_0=-5, sigma=0.5, k0=5):
+    wave = (sigma*math.sqrt(math.pi))**(-0.5)*torch.exp( -(x-x_0)**2/(2*sigma**2))
+    return  wave*torch.cos(k0*x), wave*torch.sin(k0*x)
+
+def initial_wavepacket_3(x, x_0=-5, sigma=0.5, k0=5):
+    wave = (sigma*math.sqrt(math.pi))**(-0.5)*torch.exp( -(x-x_0)**2/(2*sigma**2))
+    return  torch.cat((wave*torch.cos(k0*x), wave*torch.sin(k0*x)), dim=-1)
+#%%
+
+
+def get_space_time_grid(t_0=T_0, x_0=X_0):
+    space_lin = torch.linspace(x_0, x_0+SPACE_PERIOD, N_x, device=DEVICE)
+    time_lin = torch.linspace(t_0, t_0+TIME_LENGTH, N_t, device=DEVICE)
+    time, space = torch.meshgrid(time_lin,space_lin,indexing='ij')
+    x = torch.cat((time[:,:,None],space[:,:,None]),-1)
+    x = torch.flatten(x, end_dim=-2)    
+    return x, time_lin, space_lin
+
+def get_rand_space_time_grid():
+    x_0 = X_0+random()*D_X
+    t_0 = T_0+random()*D_T
+    x, time_lin, space_lin = get_space_time_grid(t_0,x_0)
+    return x, time_lin, space_lin
+
+def get_rand_space():
+    rand_space = X_0 + torch.rand(N_x, device=DEVICE)*SPACE_PERIOD
+    return rand_space
+
 
 #%%
 
-def plot_net(net: Net, ax, n_t: int=100, n_x:int =100,
-            t_0=0, t_len=5,x_0=-10,space_period=20):
-    space = torch.linspace(x_0, x_0+space_period, n_x, device=DEVICE)
-    time = torch.linspace(t_0, t_0+t_len, n_t, device=DEVICE)
+def plot_net(net, ax):
+    space = torch.linspace(X_0, X_0+SPACE_PERIOD, N_x, device=DEVICE)
+    time = torch.linspace(T_0, T_0+TIME_LENGTH, N_t, device=DEVICE)
     time, space = torch.meshgrid(time,space,indexing='ij')
     x = torch.cat((time[:,:,None],space[:,:,None]),-1)
     x = torch.flatten(x, end_dim=-2)
 
     psi = get_psi(net(x))
-    psi = psi.reshape(n_t,n_x)
+    psi = psi.reshape(N_t,N_x)
 
     #dt = t_len/(n_t-1)
-    dx = space_period/(n_x-1)
+    #dx = space_period/(n_x-1)
     psi2 = (torch.conj(psi)*psi).real
-    N = dx*torch.sum(psi2,dim=1)[:,None]
-    psi2 = psi2/N
+    N = D_X*torch.sum(psi2,dim=1)[:,None]
+    psi2 = psi2 /N
 
     ax.clear()
     ax.plot_surface(time.cpu(),space.cpu(),psi2.cpu())
     plt.draw()
     plt.pause(0.1)
 
+
+
 if __name__ == "__main__":
-    optimizer = optim.Adam(net.parameters(), lr=0.000001)
-    net.to(DEVICE)
-    net.load_state_dict(torch.load("./lnet2_k_neg.pth"))
+    main_net = Net2(initial_wavepacket_3)
+    main_net.to(DEVICE)
+
+    # boundary_net = PeriodicResNet()
+    # boundary_net.to(DEVICE)
 
     fig = plt.figure()
     ax = fig.add_subplot(projection='3d')
+
+    # fig2 = plt.figure()
+    # ax2 = fig2.add_subplot(projection='3d')
     plt.ion()
     plt.show(block=False)
 
-    n_x=100
-    n_t=100
+    # for lr in range(3,10):
+    #     boundary_optimizer = optim.Adam(boundary_net.parameters(), lr=10**-lr)
+    #     for epoch in range(lr*10**3):  # loop over the dataset multiple times
+    #         rand_space = get_rand_space()
+    #         inital_condition = initial_wavepacket(rand_space)
+    #         x_at_T_0 = torch.cat((torch.zeros_like(rand_space[:,None]),rand_space[:,None]), dim=-1)
+            
+    #         # zero the parameter gradients
+    #         boundary_optimizer.zero_grad()
+    #         # forward + backward + optimize
+    #         psi = get_psi(boundary_net(x_at_T_0))
+    #         psi = psi.flatten()
+    #         loss = complex_norm_loss(psi, inital_condition)
 
-    #x, time_lin, space_lin, dt, dx = get_rand_space_time_grid(n_t, n_x)
-    #inital_condition = initial_wavepacket(space_lin)
-    # for epoch in range(100):  # loop over the dataset multiple times
+    #         loss.backward()
+    #         boundary_optimizer.step()
 
-    #     x, rand_time, rand_space = get_rand_space_time_pair(n_t**2, n_x**2)
-    #     inital_condition = initial_wavepacket(rand_space)
-        
-    #     # zero the parameter gradients
-    #     optimizer.zero_grad()
-    #     # forward + backward + optimize
-    #     psi = get_psi(net(x))
-    #     #psi = psi.reshape(n_t,n_x) #for grid 
-    #     psi = psi.flatten()
-    #     loss = complex_norm_loss(psi, inital_condition)
+    #         # print statistics
+    #         running_loss = loss.item()
+    #         if epoch % 100 == 99:
+    #             print(f'[{epoch + 1}] loss: {running_loss}')
+    #         if epoch % 500 == 499:
+    #             with torch.no_grad():
+    #                 plot_net(boundary_net,ax)
+    # print('Finished Training')
+    # PATH = './bnet.pth'
+    # torch.save(boundary_net.state_dict(), PATH)
 
-    #     loss.backward()
-    #     optimizer.step()
+    # boundary_net.load_state_dict(torch.load("./bresnet_test1.pth"))
 
-    #     # print statistics
-    #     running_loss = loss.item()
-    #     if epoch % 10 == 9:
-    #         print(f'[{epoch + 1}] loss: {running_loss}')
-    #     if epoch % 10 == 9:
-    #         with torch.no_grad():
-    #             net.to("cpu")
-    #             plot_net(net,ax)
-    #             net.to(DEVICE)
-
-    # for epoch in range(10**4):  # loop over the dataset multiple times
-    #     x, rand_time, rand_space = get_rand_space_time_pair(n_t**2, n_x**2)
-        
-    #     # zero the parameter gradients
-    #     optimizer.zero_grad()
-
-    #     # forward + backward + optimize
-        
-    #     psi = get_psi(net(x))
-    #     psi = psi.reshape(n_t,n_x) #for grid 
-    #     M_loss = equation_motion_loss(psi, n_t, n_x, time_len=3, space_period=20)
-
-    #     inital_bound = torch.cat((torch.zeros_like(rand_space[:,None]),rand_space[:,None]),dim=-1)
-    #     psi = get_psi(net(inital_bound)).flatten()
-    #     inital_condition = initial_wavepacket(rand_space)
-    #     inital_loss = complex_norm_loss(psi,inital_condition)
-
-    #     loss = inital_loss*M_loss
-
-    #     loss.backward()
-    #     optimizer.step()
-
-    #     # print statistics
-    #     running_loss = loss.item()
-    #     if epoch % 50 == 49:
-    #         print(f'[{epoch + 1}] loss: {running_loss}')
-    #     if epoch % 50 == 49:
-    #         with torch.no_grad():
-    #             net.to("cpu")
-    #             plot_net(net,ax)
-    #             net.to("cuda")
+    #main_net.load_state_dict(torch.load("./mnet.pth"))
+    main_optimizer = optim.Adam(main_net.parameters(), lr=0.0005, fused=True)
+    # main_optimizer = optim.LBFGS(main_net.parameters())
     
-    for epoch in range(2*10**4):  # loop over the dataset multiple times
-        x, time_lin, space_lin, dt, dx = get_rand_space_time_grid(n_t, n_x)
-        inital_condition = initial_wavepacket(space_lin)
+    # x, time_lin, space_lin = get_space_time_grid(n_t, n_x, t_len=time_len, space_period=space_period)
+    # dt = time_len/(n_t-1)
+    # dx = space_period/(n_x-1)
+
+    # for epoch in range(10**2):
+    #     main_optimizer.zero_grad()
+    #     x, time_lin, space_lin = get_rand_space_time_grid()
+    #     loss = torch.abs(main_net(x)).max()
+    #     loss.backward()
+    #     main_optimizer.step()
+
+    #     # print statistics
+    #     running_loss = loss.item()
+    #     if epoch % 10 == 0:
+    #         print(f'[{epoch + 1}] totol_loss: {running_loss}')
+    #     if epoch % 20 == 0:
+    #         with torch.no_grad():
+    #             plot_net(main_net,ax)
+
+    # def boundary_and_main(x):
+    #     boundary = initial_wavepacket(x[:,1])[:, None]
+    #     boundary = torch.cat((boundary.real, boundary.imag), dim=-1)
+    #     main = main_net(x)
+    #     #main = main*boundary.sum()/(main.sum())*2
+        
+    #     time_grid = x[:,0][:, None]
+    #     total = boundary + main*time_grid/TIME_LENGTH  #EQ2.6 of 2205.00593
+    #     return total
+
+    for epoch in range(5*10**5): 
+        x, time_lin, space_lin = get_space_time_grid()
+        
         # zero the parameter gradients
-        optimizer.zero_grad()
+        main_optimizer.zero_grad()
 
         # forward + backward + optimize
+        #boundary = boundary_net(x)
         
-        psi = get_psi(net(x))
-        psi = psi.reshape(n_t,n_x) #for grid 
-        L_loss = lagrangian_loss(psi,dt,dx)
-        inital_loss = complex_norm_loss(psi[0],inital_condition)
-        loss = L_loss+inital_loss*10**3
+        psi = get_psi(main_net(x))
+        psi = psi.reshape(N_t,N_x) #for grid
+        
+        L_loss = lagrangian_loss(psi,D_T,D_X)
+        loss = L_loss
 
         loss.backward()
-        optimizer.step()
+        main_optimizer.step()
 
         # print statistics
         running_loss = loss.item()
-        if epoch % 100 == 99:
-            print(f'[{epoch + 1}] totol_loss: {running_loss}, inital_loss:{inital_loss}')
-        if epoch % 1000 == 999:
+        if epoch % 100 == 0:
+            print(f'[{epoch + 1}] totol_loss: {running_loss}')
+        if epoch % 200 == 0:
             with torch.no_grad():
-                plot_net(net,ax)
+                plot_net(main_net,ax)
+                #plot_net(main_net,ax2)
+        if epoch % 10**4 == 10**4-1:
+            PATH = f'./mnet_epoch_{epoch}.pth'
+            torch.save(main_net.state_dict(), PATH)
 
     print('Finished Training')
-    PATH = './lnet.pth'
-    torch.save(net.state_dict(), PATH)
+    PATH = './mnet.pth'
+    torch.save(main_net.state_dict(), PATH)
 
 #%%
 

@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.nn.parameter import Parameter
 import torchvision
+import deepxde as dde
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -270,14 +271,23 @@ def equation_motion_net_loss(net,x):
     net_out = net(x)
     real, imag = torch.split(net_out,1,-1)
 
-    dreal_x = torch.autograd.grad(real,x,torch.ones_like(real), create_graph=True, retain_graph=True)[0]
-    dreal_xx = torch.autograd.grad(dreal_x,x,torch.ones_like(dreal_x), retain_graph=True)[0]
+    dreal_time = dde.grad.jacobian(real,x,i=0)[:,0]
+    dimag_time = dde.grad.jacobian(imag,x,i=0)[:,0]
 
-    dimag_x = torch.autograd.grad(imag,x,torch.ones_like(imag), create_graph=True, retain_graph=True)[0]
-    dimag_xx = torch.autograd.grad(dimag_x,x,torch.ones_like(dimag_x), retain_graph=True)[0]
+    dreal_space2 = dde.grad.jacobian(real,x,i=1)[:,1]
+    dimag_space2 = dde.grad.jacobian(imag,x,i=1)[:,1]
 
-    real_part = 0.5*dreal_xx[:,1] - dimag_x[:,0]
-    imag_part = 0.5*dimag_xx[:,1] + dreal_x[:,0]
+    real_part = 0.5*dreal_space2 - dimag_time
+    imag_part = 0.5*dimag_space2 + dreal_time
+
+    # dreal_x = torch.autograd.grad(real,x,torch.ones_like(real), create_graph=True, retain_graph=True)[0]
+    # dreal_xx = torch.autograd.grad(dreal_x,x,torch.ones_like(dreal_x), retain_graph=True)[0]
+
+    # dimag_x = torch.autograd.grad(imag,x,torch.ones_like(imag), create_graph=True, retain_graph=True)[0]
+    # dimag_xx = torch.autograd.grad(dimag_x,x,torch.ones_like(dimag_x), retain_graph=True)[0]
+
+    # real_part = 0.5*dreal_xx[:,1] - dimag_x[:,0]
+    # imag_part = 0.5*dimag_xx[:,1] + dreal_x[:,0]
 
     equation =  real_part + imag_part*1j
     return equation.norm(dtype=torch.complex64)

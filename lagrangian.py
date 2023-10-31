@@ -133,7 +133,7 @@ class Net1(nn.Module):
     def __init__(self, space_period=20):
         super().__init__()
         self.time_fc = nn.Linear(1, 32)
-        self.space_periodic = Periodic(1, 32, space_period)
+        self.space_periodic = Periodic(1, 32, space_period, bias=False)
         self.init_periodic_fc = nn.Linear(64, 32*32) 
         self.conv1 = nn.Conv2d(1, 6, 5)
         self.pool = nn.MaxPool2d(2, 2)
@@ -163,7 +163,7 @@ class Net2(nn.Module):
     def __init__(self, inital_condition=None):
         super().__init__()
         self.time_fc = nn.Linear(1, 32)
-        self.space_periodic = Periodic(1, 32, SPACE_PERIOD)
+        self.space_periodic = Periodic(1, 32, SPACE_PERIOD, bias=False)
         self.init_periodic_fc = nn.Linear(64, 32*32) 
         self.conv1 = nn.Conv2d(1, 12, 5)
         self.pool = nn.MaxPool2d(2, 2)

@@ -1,20 +1,20 @@
 import torch
-from lagrangian import Net2, Net3, plot_net, DEVICE, get_psi, initial_wavepacket_3
+from lagrangian import Net1, Net2, Net3, plot_net, DEVICE, get_psi, initial_wavepacket_3
 import matplotlib.pyplot as plt
 from Animation import Animation
 
-# net = Net2()
-#net.load_state_dict(torch.load("./bnet1_test1.pth"))
-# net.to(DEVICE)
+net = Net2()
+net.load_state_dict(torch.load("single net1 and net2\lnet2_k_neg3.pth"))
+net.to(DEVICE)
 
-main_net = Net3(initial_wavepacket_3)
+#main_net = Net3(initial_wavepacket_3)
 
-main_net.to(DEVICE)
+#main_net.to(DEVICE)
 # boundary_net = Net1()
 # boundary_net.to(DEVICE)
 
 #boundary_net.load_state_dict(torch.load("./bnet1_test1.pth"))
-main_net.load_state_dict(torch.load("./mnet.pth"))
+#main_net.load_state_dict(torch.load("./mnet.pth"))
 
 time_len = 5
 # def boundary_and_main(x):
@@ -49,11 +49,13 @@ def run_animation(net, n_t: int=100, n_x:int =100,
     anim.run_animtion(-50)
 
 with torch.no_grad():
-    # run_animation(boundary_and_main)
+    #run_animation(net)
 
     fig = plt.figure()
     ax = fig.add_subplot(projection='3d')
-    plot_net(main_net, ax)
+    plot_net(net, ax)
+    ax.set_xlabel('$Time$', fontsize=20)
+    ax.set_ylabel('$Space$', fontsize=20)
     plt.show()
 
 
